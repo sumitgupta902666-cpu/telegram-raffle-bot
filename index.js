@@ -1,61 +1,81 @@
 import express from "express";
-import fetch from "node-fetch";
+import axios from "axios";
 
 const app = express();
 app.use(express.json());
 
-const token = process.env.BOT_TOKEN;
-const apiUrl = `https://api.telegram.org/bot${token}`;
+const TOKEN = process.env.BOT_TOKEN;
+const TELEGRAM_API = `https://api.telegram.org/bot${TOKEN}`;
+const WEBHOOK_URL = process.env.RENDER_EXTERNAL_URL; // Render auto URL
+
 let entries = [];
 
-// ✅ Telegram webhook route
-app.post(`/${token}`, async (req, res) => {
-  const data = req.body;
+// Send message function
+const send = async (chatId, text) => {
+  await axios.post(`${TELEGRAM_API}/sendMessage`, {
+    chat_id: chatId,
+    text,
+  });
+};
 
-  if (!data.message) return res.sendStatus(200);
+// Receive updates from Telegram
+app.post("/", async (req, res) => {
+  console.log("Webhook hit:", req.body);
 
-  const chatId = data.message.chat.id;
-  const text = data.message.text || "";
+  if (!req.body.message) return res.sendStatus(200);
 
-  // ✅ Start command
+  const chatId = req.body.message.chat.id;
+  const text = req.body.message.text?.trim();
+
+  // /start command
   if (text === "/start") {
-    return send(chatId, "Welcome! 🎉\nUse /join UID to enter.\nExample: /join 12345");
+    return send(chatId, `🎯 *Raffle Bot Activated!*
+
+Commands:
+/join <UID> — Join raffle
+/entries — Show all entries
+/winner — Pick random winner
+`, { parse_mode: "Markdown" });
   }
 
+  // /join command
   if (text.startsWith("/join")) {
     const uid = text.split(" ")[1];
-    if (!uid) return send(chatId, "Send like: /join 12345");
-    if (!entries.includes(uid)) entries.push(uid);
-    return send(chatId, `✅ UID *${uid}* joined!\nTotal entries: ${entries.length}`);
+
+    if (!uid) return send(chatId, "❌ Format: /join 12345");
+    if (entries.includes(uid)) return send(chatId, "⚠️ UID already joined");
+
+    entries.push(uid);
+    return send(chatId, `✅ UID *${uid}* added.\nTotal entries: ${entries.length}`);
   }
 
-  if (text === "/winner") {
-    if (entries.length === 0) return send(chatId, "No entries yet!");
-    const winner = entries[Math.floor(Math.random() * entries.length)];
-    entries = [];
-    return send(chatId, `🎉 Winner UID: *${winner}*\n✅ New round started!`);
-  }
-
+  // /entries command
   if (text === "/entries") {
-    return send(chatId, `Current entries:\n${entries.join("\n") || "None yet"}`);
+    if (!entries.length) return send(chatId, "📭 No entries yet.");
+    return send(chatId, `📌 Entries:\n${entries.join("\n")}`);
+  }
+
+  // /winner command
+  if (text === "/winner") {
+    if (!entries.length) return send(chatId, "❌ No entries to choose from.");
+    
+    const winner = entries[Math.floor(Math.random() * entries.length)];
+    return send(chatId, `🏆 Winner UID: *${winner}* 🎉`);
   }
 
   res.sendStatus(200);
 });
 
-// ✅ Send message fn
-async function send(id, msg) {
-  await fetch(`${apiUrl}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: id, text: msg, parse_mode: "Markdown" }),
-  });
-}
-
-// ✅ Home route test
-app.get("/", (req, res) => {
-  res.send("Bot Live ✅");
+// Set webhook on start
+app.get("/", async (_, res) => {
+  try {
+    await axios.get(`${TELEGRAM_API}/setWebhook?url=${WEBHOOK_URL}`);
+    return res.send("✅ Webhook set successfully!");
+  } catch (e) {
+    console.error(e);
+    return res.send("❌ Webhook error");
+  }
 });
 
-// ✅ Server port
-app.listen(3000, () => console.log("Bot running ✅"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Bot running on ${PORT}`));
